@@ -25,19 +25,24 @@ A Smart Mess Management System built with Qt6 and C++.
 ## Screenshots
 
 ### Login Page
-(Add Screenshot Here)
+
+![Login](screenshots/login.png)
 
 ### Dashboard
-(Add Screenshot Here)
+
+![Dashboard](screenshots/dashboard.png)
 
 ### Members
-(Add Screenshot Here)
+
+![Members](screenshots/members.png)
 
 ### Meals
-(Add Screenshot Here)
+
+![Meals](screenshots/meals.png)
 
 ### Billing
-(Add Screenshot Here)
+
+![Billing](screenshots/billing.png)
 
 ## Author
 
