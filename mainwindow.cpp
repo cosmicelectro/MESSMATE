@@ -17,51 +17,87 @@
 #include <QPixmap>
 
 // DATABASE CONNECTION
+// DATABASE CONNECTION
 void connectDatabase()
 {
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName("messmate.db");
 
-    if(db.open())
-        qDebug() << "Database connected!";
-    else
+    if (!db.open())
+    {
         qDebug() << "Database failed!";
+        qDebug() << db.lastError().text();
+        return;
+    }
+
+    qDebug() << "Database connected!";
 
     QSqlQuery query;
-    query.exec("CREATE TABLE IF NOT EXISTS expenses ("
-               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-               "type TEXT,"
-               "amount INTEGER,"
-               "expense_date TEXT"
-               ")");
 
-    // CREATE USERS TABLE
-    query.exec("CREATE TABLE IF NOT EXISTS users ("
-               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-               "username TEXT, "
-               "password TEXT)");
+    // Enable foreign key support
+    query.exec("PRAGMA foreign_keys = ON");
 
-    // INSERT DEFAULT USER
-    query.exec("INSERT OR IGNORE INTO users "
-               "(id, username, password) "
-               "VALUES (1, 'admin', '1234')");
-    query.exec("CREATE TABLE IF NOT EXISTS meals ("
-               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-               "username TEXT, "
-               "meal_count INTEGER, "
-               "meal_date TEXT)");
-    query.exec("CREATE TABLE IF NOT EXISTS members ("
-               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-               "name TEXT UNIQUE, "
-               "phone TEXT, "
-               "room TEXT, "
-               "paid_amount REAL DEFAULT 0, "
-               "payment_date TEXT)");
+    // USERS TABLE
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS users ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "username TEXT UNIQUE,"
+        "password TEXT)"
+        );
+
+    // DEFAULT USER
+    query.exec(
+        "INSERT OR IGNORE INTO users(id, username, password) "
+        "VALUES(1, 'admin', '1234')"
+        );
+
+    // MEMBERS TABLE
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS members ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "name TEXT UNIQUE,"
+        "phone TEXT,"
+        "room TEXT)"
+        );
+
+    // MEALS TABLE
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS meals ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "member_id INTEGER,"
+        "meal_count INTEGER,"
+        "meal_date TEXT,"
+        "FOREIGN KEY(member_id) REFERENCES members(id) "
+        "ON DELETE CASCADE)"
+        );
+
+    // EXPENSES TABLE
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS expenses ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "type TEXT,"
+        "amount REAL,"
+        "expense_date TEXT)"
+        );
+
+    // PAYMENTS TABLE
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS payments ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "member_id INTEGER,"
+        "amount REAL,"
+        "payment_date TEXT,"
+        "FOREIGN KEY(member_id) REFERENCES members(id) "
+        "ON DELETE CASCADE)"
+        );
+
+    // ACTIVITIES TABLE
     query.exec(
         "CREATE TABLE IF NOT EXISTS activities ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "activity TEXT,"
-        "activity_time TEXT)");
+        "activity_time TEXT)"
+        );
 }
 
 // CONSTRUCTOR
@@ -92,6 +128,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->mealTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
 
     ui->memberTable_2->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->memberTable_2->horizontalHeader()->setSectionResizeMode(4,QHeaderView::ResizeToContents);
     ui->mealTable->horizontalHeader()->setDefaultAlignment(Qt::AlignCenter);
 
     ui->memberTable_2->horizontalHeader()->setDefaultAlignment(Qt::AlignCenter);
@@ -128,14 +165,15 @@ MainWindow::MainWindow(QWidget *parent)
         "padding: 8px; "
         "}"
         );
-    ui->expenseTable->setColumnCount(4);
+    ui->expenseTable->setColumnCount(5);
 
     QStringList expenseHeaders;
 
     expenseHeaders << "No."
                    << "Type"
                    << "Amount"
-                   << "Date";
+                   << "Date"
+                   << "Edit";
 
     ui->expenseTable->setHorizontalHeaderLabels(
         expenseHeaders);
@@ -306,14 +344,15 @@ MainWindow::MainWindow(QWidget *parent)
         QAbstractItemView::SingleSelection);
     ui->mealTable->setFocusPolicy(Qt::NoFocus);
 
-    ui->memberTable_2->setColumnCount(4);
+    ui->memberTable_2->setColumnCount(5);
 
     QStringList memberHeaders;
 
     memberHeaders << "No."
                   << "Name"
                   << "Phone"
-                  << "Room";
+                  << "Room"
+                  << "Edit";
 
     ui->memberTable_2->setHorizontalHeaderLabels(memberHeaders);
 
@@ -331,10 +370,6 @@ MainWindow::MainWindow(QWidget *parent)
     updateDashboardStats();
     loadExpenseChart();
 
-
-
-
-
     // OPEN LOGIN PAGE FIRST
     ui->stackedWidget->setCurrentIndex(0);
 
@@ -350,7 +385,15 @@ void MainWindow::loadMeals()
     ui->mealTable->setRowCount(0);
 
     QSqlQuery query;
-    query.exec("SELECT id, username, meal_count, meal_date FROM meals");
+
+    query.exec(
+        "SELECT meals.id, members.name, "
+        "meals.meal_count, meals.meal_date "
+        "FROM meals "
+        "INNER JOIN members "
+        "ON meals.member_id = members.id "
+        "ORDER BY meals.id DESC"
+        );
 
     int row = 0;
 
@@ -359,17 +402,30 @@ void MainWindow::loadMeals()
         ui->mealTable->insertRow(row);
 
         QTableWidgetItem *item1 =
-            new QTableWidgetItem(QString::number(row + 1));
-        item1->setData(Qt::UserRole,
-                       query.value(0).toInt());
+            new QTableWidgetItem(
+                QString::number(row + 1)
+                );
+
+        // Store meal database ID
+        item1->setData(
+            Qt::UserRole,
+            query.value(0).toInt()
+            );
+
         QTableWidgetItem *item2 =
-            new QTableWidgetItem(query.value(1).toString());
+            new QTableWidgetItem(
+                query.value(1).toString()
+                );
 
         QTableWidgetItem *item3 =
-            new QTableWidgetItem(query.value(2).toString());
+            new QTableWidgetItem(
+                query.value(2).toString()
+                );
 
         QTableWidgetItem *item4 =
-            new QTableWidgetItem(query.value(3).toString());
+            new QTableWidgetItem(
+                query.value(3).toString()
+                );
 
         item1->setTextAlignment(Qt::AlignCenter);
         item2->setTextAlignment(Qt::AlignCenter);
@@ -390,9 +446,14 @@ void MainWindow::loadRecentMeals()
 
     QSqlQuery query;
 
-    query.exec("SELECT username, meal_count, meal_date "
-               "FROM meals "
-               "ORDER BY id DESC LIMIT 5");
+    query.exec(
+        "SELECT members.name, meals.meal_count, meals.meal_date "
+        "FROM meals "
+        "INNER JOIN members "
+        "ON meals.member_id = members.id "
+        "ORDER BY meals.id DESC "
+        "LIMIT 5"
+        );
 
     int row = 0;
 
@@ -401,13 +462,19 @@ void MainWindow::loadRecentMeals()
         ui->recentMealsTable->insertRow(row);
 
         QTableWidgetItem *item1 =
-            new QTableWidgetItem(query.value(0).toString());
+            new QTableWidgetItem(
+                query.value(0).toString()
+                );
 
         QTableWidgetItem *item2 =
-            new QTableWidgetItem(query.value(1).toString());
+            new QTableWidgetItem(
+                query.value(1).toString()
+                );
 
         QTableWidgetItem *item3 =
-            new QTableWidgetItem(query.value(2).toString());
+            new QTableWidgetItem(
+                query.value(2).toString()
+                );
 
         item1->setTextAlignment(Qt::AlignCenter);
         item2->setTextAlignment(Qt::AlignCenter);
@@ -456,10 +523,30 @@ void MainWindow::loadExpenses()
         item3->setTextAlignment(Qt::AlignCenter);
         item4->setTextAlignment(Qt::AlignCenter);
 
-        ui->expenseTable->setItem(row, 0, item1);
-        ui->expenseTable->setItem(row, 1, item2);
-        ui->expenseTable->setItem(row, 2, item3);
-        ui->expenseTable->setItem(row, 3, item4);
+        ui->expenseTable->setItem(row,0,item1);
+        ui->expenseTable->setItem(row,1,item2);
+        ui->expenseTable->setItem(row,2,item3);
+        ui->expenseTable->setItem(row,3,item4);
+
+        QPushButton *editBtn = new QPushButton("✏");
+
+        editBtn->setProperty("id", query.value(0).toInt());
+
+        ui->expenseTable->setCellWidget(row,4,editBtn);
+
+        connect(editBtn,&QPushButton::clicked,this,[=]()
+                {
+                    currentExpenseId = editBtn->property("id").toInt();
+
+                    ui->expenseTypeInput->setText(item2->text());
+
+                    ui->expenseAmountInput->setText(item3->text());
+
+                    ui->expenseDateInput->setDate(
+                        QDate::fromString(item4->text(),"dd-MM-yyyy"));
+
+                    ui->addExpenseBtn->setText("Update Expense");
+                });
 
         row++;
     }
@@ -469,7 +556,7 @@ void MainWindow::loadMembers()
     ui->memberTable_2->setRowCount(0);
 
     QSqlQuery query;
-    query.exec("SELECT name, phone, room FROM members");
+    query.exec("SELECT id, name, phone, room FROM members");
 
     int row = 0;
 
@@ -479,25 +566,60 @@ void MainWindow::loadMembers()
 
         QTableWidgetItem *item1 =
             new QTableWidgetItem(QString::number(row + 1));
+        item1->setData(Qt::UserRole, query.value(0).toInt());
 
         QTableWidgetItem *item2 =
-            new QTableWidgetItem(query.value(0).toString());
-
-        QTableWidgetItem *item3 =
             new QTableWidgetItem(query.value(1).toString());
 
-        QTableWidgetItem *item4 =
+        QTableWidgetItem *item3 =
             new QTableWidgetItem(query.value(2).toString());
+
+        QTableWidgetItem *item4 =
+            new QTableWidgetItem(query.value(3).toString());
 
         item1->setTextAlignment(Qt::AlignCenter);
         item2->setTextAlignment(Qt::AlignCenter);
         item3->setTextAlignment(Qt::AlignCenter);
         item4->setTextAlignment(Qt::AlignCenter);
 
-        ui->memberTable_2->setItem(row, 0, item1);
-        ui->memberTable_2->setItem(row, 1, item2);
-        ui->memberTable_2->setItem(row, 2, item3);
-        ui->memberTable_2->setItem(row, 3, item4);
+        ui->memberTable_2->setItem(row,0,item1);
+        ui->memberTable_2->setItem(row,1,item2);
+        ui->memberTable_2->setItem(row,2,item3);
+        ui->memberTable_2->setItem(row,3,item4);
+
+        QPushButton *editBtn = new QPushButton("✏");
+
+        editBtn->setCursor(Qt::PointingHandCursor);
+
+        editBtn->setStyleSheet(
+            "QPushButton{"
+            "background:#3A3AF5;"
+            "color:white;"
+            "border-radius:6px;"
+            "font-size:15px;"
+            "font-weight:bold;"
+            "}"
+            "QPushButton:hover{"
+            "background:#5555ff;"
+            "}");
+
+        editBtn->setProperty("id", query.value(0).toInt());
+
+        ui->memberTable_2->setCellWidget(row,4,editBtn);
+
+        connect(editBtn,&QPushButton::clicked,this,[=]()
+                {
+                    currentMemberId =
+                        editBtn->property("id").toInt();
+
+                    ui->memberNameInput->setText(item2->text());
+
+                    ui->memberPhoneInput->setText(item3->text());
+
+                    ui->memberRoomInput->setText(item4->text());
+
+                    ui->addMemberBtn->setText("Update Member");
+                });
 
         row++;
     }
@@ -509,13 +631,19 @@ void MainWindow::loadMemberNames()
     QSqlQuery query;
 
     query.exec(
-        "SELECT DISTINCT name "
-        "FROM members");
+        "SELECT id, name "
+        "FROM members "
+        "ORDER BY name"
+        );
 
     while(query.next())
     {
+        int memberId = query.value(0).toInt();
+        QString memberName = query.value(1).toString();
+
         ui->mealMemberCombo->addItem(
-            query.value(0).toString()
+            memberName,
+            memberId
             );
     }
 }
@@ -523,9 +651,10 @@ void MainWindow::updateDashboardStats()
 {
     QSqlQuery query;
     //Total Paid
+    // TOTAL PAID
     query.exec(
-        "SELECT SUM(paid_amount) "
-        "FROM members");
+        "SELECT COALESCE(SUM(amount), 0) "
+        "FROM payments");
 
     double totalPaid = 0;
 
@@ -534,6 +663,7 @@ void MainWindow::updateDashboardStats()
         totalPaid =
             query.value(0).toDouble();
     }
+
 
     ui->totalPaidLabel->setText(
         QString::number(totalPaid, 'f', 2));
@@ -669,32 +799,64 @@ void MainWindow::on_logoutBtn_clicked()
 }
 void MainWindow::on_addMealBtn_clicked()
 {
-    QString username =
+    QString memberName =
         ui->mealMemberCombo->currentText();
-    int mealCount = ui->mealCountInput->text().toInt();
+
+    int memberId =
+        ui->mealMemberCombo->currentData().toInt();
+
+    int mealCount =
+        ui->mealCountInput->text().toInt();
+
     QString date =
-        ui->mealDateInput->date().toString("dd-MM-yyyy");
-    if(username.isEmpty() || mealCount <= 0)
+        ui->mealDateInput
+            ->date()
+            .toString("dd-MM-yyyy");
+
+    // Validate input
+    if(memberName.isEmpty() ||
+        memberId <= 0 ||
+        mealCount <= 0)
     {
-        QMessageBox::warning(this,
-                             "Error",
-                             "Invalid meal input!");
+        QMessageBox::warning(
+            this,
+            "Error",
+            "Invalid meal input!"
+            );
         return;
     }
+
     QSqlQuery query;
 
-    query.prepare("INSERT INTO meals "
-                  "(username, meal_count, meal_date) "
-                  "VALUES (:username, :meal_count, :meal_date)");
+    query.prepare(
+        "INSERT INTO meals "
+        "(member_id, meal_count, meal_date) "
+        "VALUES (:member_id, :meal_count, :meal_date)"
+        );
 
-    query.bindValue(":username", username);
-    query.bindValue(":meal_count", mealCount);
-    query.bindValue(":meal_date", date);
+    query.bindValue(
+        ":member_id",
+        memberId
+        );
+
+    query.bindValue(
+        ":meal_count",
+        mealCount
+        );
+
+    query.bindValue(
+        ":meal_date",
+        date
+        );
+
     if(query.exec())
     {
-        QMessageBox::information(this,
-                                 "Success",
-                                 "Meal Added!");
+        QMessageBox::information(
+            this,
+            "Success",
+            "Meal Added!"
+            );
+
         loadMeals();
         loadRecentMeals();
         updateDashboardStats();
@@ -702,33 +864,42 @@ void MainWindow::on_addMealBtn_clicked()
         updateBillingStats();
 
         ui->mealCountInput->clear();
+
+        // Activity
+        QSqlQuery activity;
+
+        activity.prepare(
+            "INSERT INTO activities "
+            "(activity, activity_time) "
+            "VALUES (:activity, :time)"
+            );
+
+        activity.bindValue(
+            ":activity",
+            memberName +
+                " added " +
+                QString::number(mealCount) +
+                " meals"
+            );
+
+        activity.bindValue(
+            ":time",
+            QDateTime::currentDateTime()
+                .toString("dd-MM hh:mm")
+            );
+
+        activity.exec();
+
+        loadRecentActivities();
     }
     else
     {
-        QMessageBox::warning(this,
-                             "Error",
-                             "Failed to add meal!");
+        QMessageBox::warning(
+            this,
+            "Error",
+            query.lastError().text()
+            );
     }
-    QSqlQuery activity;
-
-    activity.prepare(
-        "INSERT INTO activities "
-        "(activity, activity_time) "
-        "VALUES(:activity,:time)");
-
-    activity.bindValue(
-        ":activity",
-        username + " added " +
-            QString::number(mealCount) +
-            " meals");
-
-    activity.bindValue(
-        ":time",
-        QDateTime::currentDateTime()
-            .toString("dd-MM hh:mm"));
-
-    activity.exec();
-    loadRecentActivities();
 }
 
 
@@ -748,32 +919,40 @@ void MainWindow::on_addMemberBtn_clicked()
     }
 
     QSqlQuery query;
-    QSqlQuery checkQuery;
 
-    checkQuery.prepare(
-        "SELECT COUNT(*) "
-        "FROM members "
-        "WHERE name = :name");
-
-    checkQuery.bindValue(":name", name);
-
-    checkQuery.exec();
-
-    if(checkQuery.next())
+    if(currentMemberId == -1)
     {
-        if(checkQuery.value(0).toInt() > 0)
-        {
-            QMessageBox::warning(
-                this,
-                "Duplicate",
-                "Member already exists!");
+        QSqlQuery checkQuery;
 
+        checkQuery.prepare(
+            "SELECT COUNT(*) FROM members WHERE name=:name");
+
+        checkQuery.bindValue(":name", name);
+        checkQuery.exec();
+
+        if(checkQuery.next() && checkQuery.value(0).toInt()>0)
+        {
+            QMessageBox::warning(this,
+                                 "Duplicate",
+                                 "Member already exists!");
             return;
         }
+
+        query.prepare(
+            "INSERT INTO members(name,phone,room)"
+            "VALUES(:name,:phone,:room)");
     }
-    query.prepare("INSERT INTO members "
-                  "(name, phone, room) "
-                  "VALUES (:name, :phone, :room)");
+    else
+    {
+        query.prepare(
+            "UPDATE members "
+            "SET name=:name,"
+            "phone=:phone,"
+            "room=:room "
+            "WHERE id=:id");
+
+        query.bindValue(":id", currentMemberId);
+    }
 
     query.bindValue(":name", name);
     query.bindValue(":phone", phone);
@@ -789,9 +968,14 @@ void MainWindow::on_addMemberBtn_clicked()
         updateDashboardStats();
         updateBillingStats();
 
-        QMessageBox::information(this,
-                                 "Success",
-                                 "Member Added Successfully!");
+        currentMemberId = -1;
+
+        ui->addMemberBtn->setText("Add Member");
+
+        QMessageBox::information(
+            this,
+            "Success",
+            "Saved Successfully!");
 
         // Clear inputs
         ui->memberNameInput->clear();
@@ -1050,8 +1234,15 @@ void MainWindow::loadMemberBills()
 {
     ui->memberBillTable->setRowCount(0);
 
+    // -----------------------------
+    // TOTAL EXPENSES
+    // -----------------------------
     QSqlQuery expenseQuery;
-    expenseQuery.exec("SELECT SUM(amount) FROM expenses");
+
+    expenseQuery.exec(
+        "SELECT COALESCE(SUM(amount), 0) "
+        "FROM expenses"
+        );
 
     double totalExpenses = 0;
 
@@ -1061,8 +1252,15 @@ void MainWindow::loadMemberBills()
             expenseQuery.value(0).toDouble();
     }
 
+    // -----------------------------
+    // TOTAL MEALS
+    // -----------------------------
     QSqlQuery mealQuery;
-    mealQuery.exec("SELECT SUM(meal_count) FROM meals");
+
+    mealQuery.exec(
+        "SELECT COALESCE(SUM(meal_count), 0) "
+        "FROM meals"
+        );
 
     double totalMeals = 0;
 
@@ -1072,6 +1270,9 @@ void MainWindow::loadMemberBills()
             mealQuery.value(0).toDouble();
     }
 
+    // -----------------------------
+    // MEAL RATE
+    // -----------------------------
     double mealRate = 0;
 
     if(totalMeals > 0)
@@ -1079,35 +1280,42 @@ void MainWindow::loadMemberBills()
         mealRate = totalExpenses / totalMeals;
     }
 
+    // -----------------------------
+    // LOAD MEMBERS
+    // -----------------------------
     QSqlQuery memberQuery;
 
     memberQuery.exec(
-        "SELECT name, paid_amount, payment_date "
-        "FROM members");
+        "SELECT id, name "
+        "FROM members "
+        "ORDER BY name"
+        );
 
     int row = 0;
 
     while(memberQuery.next())
     {
+        int memberId =
+            memberQuery.value(0).toInt();
+
         QString memberName =
-            memberQuery.value(0).toString();
+            memberQuery.value(1).toString();
 
-        double paid =
-            memberQuery.value(1).toDouble();
-
-        QString paymentDate =
-            memberQuery.value(2).toString();
-
+        // -----------------------------
+        // MEMBER MEALS
+        // -----------------------------
         QSqlQuery mealCountQuery;
 
         mealCountQuery.prepare(
-            "SELECT SUM(meal_count) "
+            "SELECT COALESCE(SUM(meal_count), 0) "
             "FROM meals "
-            "WHERE username = :name");
+            "WHERE member_id = :member_id"
+            );
 
         mealCountQuery.bindValue(
-            ":name",
-            memberName);
+            ":member_id",
+            memberId
+            );
 
         mealCountQuery.exec();
 
@@ -1119,13 +1327,72 @@ void MainWindow::loadMemberBills()
                 mealCountQuery.value(0).toInt();
         }
 
+        // -----------------------------
+        // MEMBER PAYMENTS
+        // -----------------------------
+        QSqlQuery paymentQuery;
+
+        paymentQuery.prepare(
+            "SELECT COALESCE(SUM(amount), 0) "
+            "FROM payments "
+            "WHERE member_id = :member_id"
+            );
+
+        paymentQuery.bindValue(
+            ":member_id",
+            memberId
+            );
+
+        paymentQuery.exec();
+
+        double paid = 0;
+
+        if(paymentQuery.next())
+        {
+            paid =
+                paymentQuery.value(0).toDouble();
+        }
+
+        // -----------------------------
+        // LAST PAYMENT DATE
+        // -----------------------------
+        QSqlQuery dateQuery;
+
+        dateQuery.prepare(
+            "SELECT payment_date "
+            "FROM payments "
+            "WHERE member_id = :member_id "
+            "ORDER BY id DESC "
+            "LIMIT 1"
+            );
+
+        dateQuery.bindValue(
+            ":member_id",
+            memberId
+            );
+
+        dateQuery.exec();
+
+        QString paymentDate = "-";
+
+        if(dateQuery.next())
+        {
+            paymentDate =
+                dateQuery.value(0).toString();
+        }
+
+        // -----------------------------
+        // BILL CALCULATION
+        // -----------------------------
         double totalBill =
             meals * mealRate;
 
-        // BALANCE INSTEAD OF DUE
         double balance =
             paid - totalBill;
 
+        // -----------------------------
+        // ADD ROW
+        // -----------------------------
         ui->memberBillTable->insertRow(row);
 
         QTableWidgetItem *item1 =
@@ -1141,20 +1408,32 @@ void MainWindow::loadMemberBills()
 
         QTableWidgetItem *item4 =
             new QTableWidgetItem(
-                QString::number(totalBill, 'f', 2));
+                QString::number(
+                    totalBill,
+                    'f',
+                    2));
 
         QTableWidgetItem *item5 =
             new QTableWidgetItem(
-                QString::number(paid, 'f', 2));
+                QString::number(
+                    paid,
+                    'f',
+                    2));
 
         QTableWidgetItem *item6 =
             new QTableWidgetItem(
-                QString::number(balance, 'f', 2));
+                QString::number(
+                    balance,
+                    'f',
+                    2));
 
         QTableWidgetItem *item7 =
             new QTableWidgetItem(
                 paymentDate);
 
+        // -----------------------------
+        // ALIGNMENT
+        // -----------------------------
         item1->setTextAlignment(Qt::AlignCenter);
         item2->setTextAlignment(Qt::AlignCenter);
         item3->setTextAlignment(Qt::AlignCenter);
@@ -1163,24 +1442,41 @@ void MainWindow::loadMemberBills()
         item6->setTextAlignment(Qt::AlignCenter);
         item7->setTextAlignment(Qt::AlignCenter);
 
-        // GREEN = Advance Money
+        // -----------------------------
+        // BALANCE COLOR
+        // -----------------------------
         if(balance > 0)
         {
             item6->setForeground(Qt::darkGreen);
         }
-        // RED = Still Owes Money
         else if(balance < 0)
         {
             item6->setForeground(Qt::red);
         }
 
-        ui->memberBillTable->setItem(row, 0, item1);
-        ui->memberBillTable->setItem(row, 1, item2);
-        ui->memberBillTable->setItem(row, 2, item3);
-        ui->memberBillTable->setItem(row, 3, item4);
-        ui->memberBillTable->setItem(row, 4, item5);
-        ui->memberBillTable->setItem(row, 5, item6);
-        ui->memberBillTable->setItem(row, 6, item7);
+        // -----------------------------
+        // INSERT INTO TABLE
+        // -----------------------------
+        ui->memberBillTable->setItem(
+            row, 0, item1);
+
+        ui->memberBillTable->setItem(
+            row, 1, item2);
+
+        ui->memberBillTable->setItem(
+            row, 2, item3);
+
+        ui->memberBillTable->setItem(
+            row, 3, item4);
+
+        ui->memberBillTable->setItem(
+            row, 4, item5);
+
+        ui->memberBillTable->setItem(
+            row, 5, item6);
+
+        ui->memberBillTable->setItem(
+            row, 6, item7);
 
         row++;
     }
@@ -1251,9 +1547,23 @@ void MainWindow::on_addExpenseBtn_clicked()
     }
     QSqlQuery query;
 
-    query.prepare("INSERT INTO expenses "
-                  "(type, amount, expense_date) "
-                  "VALUES (:type, :amount, :date)");
+    if(currentExpenseId==-1)
+    {
+        query.prepare(
+            "INSERT INTO expenses(type,amount,expense_date)"
+            "VALUES(:type,:amount,:date)");
+    }
+    else
+    {
+        query.prepare(
+            "UPDATE expenses "
+            "SET type=:type,"
+            "amount=:amount,"
+            "expense_date=:date "
+            "WHERE id=:id");
+
+        query.bindValue(":id",currentExpenseId);
+    }
 
     query.bindValue(":type", type);
     query.bindValue(":amount", amount);
@@ -1261,6 +1571,9 @@ void MainWindow::on_addExpenseBtn_clicked()
 
     if(query.exec())
     {
+        currentExpenseId=-1;
+
+        ui->addExpenseBtn->setText("Add Expense");
         loadExpenses();
         loadExpenseChart();
         loadRecentExpenses();
@@ -1355,18 +1668,30 @@ void MainWindow::loadPaymentMembers()
 
     QSqlQuery query;
 
-    query.exec("SELECT DISTINCT name FROM members");
+    query.exec(
+        "SELECT id, name "
+        "FROM members "
+        "ORDER BY name"
+        );
 
     while(query.next())
     {
+        int memberId = query.value(0).toInt();
+        QString memberName = query.value(1).toString();
+
         ui->paymentMemberCombo->addItem(
-            query.value(0).toString());
+            memberName,
+            memberId
+            );
     }
 }
 void MainWindow::on_updatePaymentBtn_clicked()
 {
-    QString member =
+    QString memberName =
         ui->paymentMemberCombo->currentText();
+
+    int memberId =
+        ui->paymentMemberCombo->currentData().toInt();
 
     double amount =
         ui->paymentAmountInput->text().toDouble();
@@ -1376,68 +1701,80 @@ void MainWindow::on_updatePaymentBtn_clicked()
             ->date()
             .toString("dd-MM-yyyy");
 
-    if(member.isEmpty() || amount <= 0)
+    if(memberName.isEmpty() || memberId <= 0 || amount <= 0)
     {
-        QMessageBox::warning(this,
-                             "Error",
-                             "Invalid payment data!");
+        QMessageBox::warning(
+            this,
+            "Error",
+            "Invalid payment data!"
+            );
         return;
     }
 
     QSqlQuery query;
 
     query.prepare(
-        "UPDATE members "
-        "SET paid_amount = paid_amount + :amount, "
-        "payment_date = :date "
-        "WHERE name = :name");
+        "INSERT INTO payments "
+        "(member_id, amount, payment_date) "
+        "VALUES (:member_id, :amount, :date)"
+        );
 
+    query.bindValue(":member_id", memberId);
     query.bindValue(":amount", amount);
     query.bindValue(":date", paymentDate);
-    query.bindValue(":name", member);
 
     if(query.exec())
     {
-        QMessageBox::information(this,
-                                 "Success",
-                                 "Payment Updated!");
-
-        loadMemberBills();
-        updateBillingStats();
-        updateDashboardStats();
-        loadRecentActivities();
+        QMessageBox::information(
+            this,
+            "Success",
+            "Payment Added!"
+            );
 
         ui->paymentAmountInput->clear();
 
         ui->paymentDateInput->setDate(
-            QDate::currentDate());
+            QDate::currentDate()
+            );
+
+        loadMemberBills();
+        updateBillingStats();
+        updateDashboardStats();
+
+        // Activity
+        QSqlQuery activity;
+
+        activity.prepare(
+            "INSERT INTO activities "
+            "(activity, activity_time) "
+            "VALUES (:activity, :time)"
+            );
+
+        activity.bindValue(
+            ":activity",
+            memberName +
+                " paid Tk " +
+                QString::number(amount, 'f', 2)
+            );
+
+        activity.bindValue(
+            ":time",
+            QDateTime::currentDateTime()
+                .toString("dd-MM hh:mm")
+            );
+
+        activity.exec();
+
+        loadRecentActivities();
     }
     else
     {
-        QMessageBox::warning(this,
-                             "Error",
-                             query.lastError().text());
+        QMessageBox::warning(
+            this,
+            "Error",
+            query.lastError().text()
+            );
     }
-    QSqlQuery activity;
-
-    activity.prepare(
-        "INSERT INTO activities "
-        "(activity, activity_time) "
-        "VALUES(:activity,:time)");
-
-    activity.bindValue(
-        ":activity",
-        member +
-            " paid Tk "
-            + QString::number(amount));
-
-    activity.bindValue(
-        ":time",
-        QDateTime::currentDateTime()
-            .toString("dd-MM hh:mm"));
-
-    activity.exec();
-    loadRecentActivities();
 }
 void MainWindow::loadRecentActivities()
 {
